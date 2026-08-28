@@ -1,7 +1,11 @@
 "use client";
 
 import Link from "next/link";
+import { useState, useSyncExternalStore } from "react";
+import { isMuted, setMuted } from "@/lib/audio/sfx";
 import type { Snapshot } from "@/lib/game/types";
+
+const subscribeMuted = () => () => {};
 
 export type HudInfo = {
   names: [string, string];
@@ -37,6 +41,9 @@ export function HUD({ match, info, onCopy, onRematch }: {
   onRematch?: () => void;
 }) {
   const [a, b] = match.fighters;
+  const storedMuted = useSyncExternalStore(subscribeMuted, isMuted, () => false);
+  const [mutedOverride, setMutedOverride] = useState<boolean | null>(null);
+  const muted = mutedOverride ?? storedMuted;
   const banner =
     match.winner !== null
       ? `${info.names[match.winner]} wins`
@@ -112,9 +119,22 @@ export function HUD({ match, info, onCopy, onRematch }: {
 
       <div className="flex flex-wrap items-end justify-between gap-3 text-[11px] text-white/55">
         <p>Move WASD · Jump W/Space · Attack J · Special K</p>
-        <Link href="/" className="pointer-events-auto text-white/70 hover:text-white">
-          Leave
-        </Link>
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => {
+              const next = !muted;
+              setMuted(next);
+              setMutedOverride(next);
+            }}
+            className="pointer-events-auto text-white/70 hover:text-white"
+          >
+            {muted ? "Unmute" : "Mute"}
+          </button>
+          <Link href="/" className="pointer-events-auto text-white/70 hover:text-white">
+            Leave
+          </Link>
+        </div>
       </div>
     </div>
   );

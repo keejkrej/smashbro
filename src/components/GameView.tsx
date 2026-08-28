@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { initSfx, play, unlockSfx } from "@/lib/audio/sfx";
 import { createInputSampler } from "@/lib/game/input";
 import { applySnapshot, cloneSnapshot, createMatch, dummyInput, resetMatch, stepMatch } from "@/lib/game/sim";
 import { TICK_HZ, type Match, type Snapshot } from "@/lib/game/types";
@@ -8,6 +9,15 @@ import { clientId, connectRoom, type RoomClient } from "@/lib/net/client";
 import { startRenderer } from "@/lib/render/engine";
 import { describeGpuError } from "@/lib/render/gpu-error";
 import { HUD, type HudInfo } from "./HUD";
+
+const subscribeOrigin = () => () => {};
+const getOrigin = () => window.location.origin;
+const getServerOrigin = () => "";
+
+function playSfx(names: readonly string[] | undefined): void {
+  if (!names || names.length === 0) return;
+  for (const name of names) play(name);
+}
 
 export type PlayMode = "online" | "local" | "training";
 
@@ -18,7 +28,8 @@ export function GameView({ mode, room }: { mode: PlayMode; room?: string }) {
   const [view, setView] = useState<Snapshot>(() => cloneSnapshot(createMatch()));
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
-  const [shareUrl, setShareUrl] = useState<string | undefined>(undefined);
+  const origin = useSyncExternalStore(subscribeOrigin, getOrigin, getServerOrigin);
+  const shareUrl = mode === "online" && room && origin ? `${origin}/r/${room}` : undefined;
   const [hudExtra, setHudExtra] = useState<{
     names: [string, string];
     slot: 0 | 1 | null;
@@ -32,14 +43,6 @@ export function GameView({ mode, room }: { mode: PlayMode; room?: string }) {
   });
 
   useEffect(() => {
-    if (mode === "online" && room) {
-      setShareUrl(`${window.location.origin}/r/${room}`);
-    } else {
-      setShareUrl(undefined);
-    }
-  }, [mode, room]);
-
-  useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
@@ -47,7 +50,17 @@ export function GameView({ mode, room }: { mode: PlayMode; room?: string }) {
     matchRef.current = match;
     if (mode !== "online") match.countdown = 3;
 
+    initSfx();
+    const unlockAudio = () => {
+      initSfx();
+      unlockSfx();
+    };
+    window.addEventListener("pointerdown", unlockAudio);
+    window.addEventListener("keydown", unlockAudio);
+    window.addEventListener("touchstart", unlockAudio);
+
     const input = createInputSampler();
+    let sfxRead = 0;
     let slot: 0 | 1 = 0;
     let filled: [boolean, boolean] = mode === "online" ? [false, false] : [true, true];
     let names: [string, string] = [
@@ -62,6 +75,7 @@ export function GameView({ mode, room }: { mode: PlayMode; room?: string }) {
     let rendererStop: (() => void) | null = null;
     rematchRef.current = () => {
       resetMatch(match);
+      sfxRead = 0;
       client?.send({ type: "rematch" });
       setView(cloneSnapshot(match));
     };
@@ -93,15 +107,22 @@ export function GameView({ mode, room }: { mode: PlayMode; room?: string }) {
             filled = event.filled;
             names = ["Ember", "Volt"];
             hostReady = filled[0] && filled[1];
-            if (!wasReady && hostReady && slot === 0) resetMatch(match);
+            if (!wasReady && hostReady && slot === 0) {
+              resetMatch(match);
+              sfxRead = 0;
+            }
             refreshHud(hostReady ? "Get ready" : "Waiting for a challenger", !hostReady);
           } else if (event.type === "relay") {
             if (event.event.type === "input" && slot === 0) {
               remoteBits = event.event.bits;
             } else if (event.event.type === "state" && slot === 1) {
               applySnapshot(match, event.event.snapshot);
+              playSfx(match.sfx);
+              match.sfx.length = 0;
+              sfxRead = 0;
             } else if (event.event.type === "rematch") {
               resetMatch(match);
+              sfxRead = 0;
               remoteBits = 0;
               setView(cloneSnapshot(match));
             }
@@ -148,8 +169,15 @@ export function GameView({ mode, room }: { mode: PlayMode; room?: string }) {
         const inputs: [number, number] = online && slot === 1 ? [remoteBits, p1] : [p1, p2];
         stepMatch(match, inputs);
         ticks += 1;
+        playSfx(match.sfx.slice(sfxRead));
+        sfxRead = match.sfx.length;
         if (online && ticks % 2 === 0) {
           client?.send({ type: "state", snapshot: cloneSnapshot(match) });
+          match.sfx.length = 0;
+          sfxRead = 0;
+        } else if (!online) {
+          match.sfx.length = 0;
+          sfxRead = 0;
         }
       } else {
         client?.send({ type: "input", bits: input.readP1(), seq: ticks++ });
@@ -170,6 +198,9 @@ export function GameView({ mode, room }: { mode: PlayMode; room?: string }) {
     return () => {
       stopped = true;
       window.clearInterval(simId);
+      window.removeEventListener("pointerdown", unlockAudio);
+      window.removeEventListener("keydown", unlockAudio);
+      window.removeEventListener("touchstart", unlockAudio);
       input.dispose();
       client?.close();
       rendererStop?.();

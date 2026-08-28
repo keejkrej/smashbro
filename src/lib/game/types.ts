@@ -56,6 +56,7 @@ export type Match = {
   hitY: number;
   hitAge: number;
   started: boolean;
+  sfx: string[];
 };
 
 export type Snapshot = {
@@ -71,6 +72,7 @@ export type Snapshot = {
   hitY: number;
   hitAge: number;
   started: boolean;
+  sfx: string[];
 };
 
 export const FIGHTER_W = 0.72;

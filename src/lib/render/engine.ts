@@ -15,7 +15,7 @@ import {
 } from "vgpu";
 import { box, capsule, perspectiveCamera, sphere } from "vgpu/scene";
 import { compose } from "@/lib/game/mat4";
-import { STAGE, type Match } from "@/lib/game/types";
+import { STAGE, type Fighter, type Match } from "@/lib/game/types";
 import skySource from "./shaders/sky.wgsl";
 import meshSource from "./shaders/mesh.wgsl";
 import particleSource from "./shaders/particles.wgsl";
@@ -27,6 +27,7 @@ export type Renderer = {
 
 const P1 = [0.96, 0.34, 0.16, 1] as const;
 const P2 = [0.18, 0.72, 1.0, 1] as const;
+const SKIN = [1, 0.92, 0.85, 1] as const;
 const STAGE_COL = [0.16, 0.15, 0.22, 1] as const;
 const EDGE_COL = [1.0, 0.82, 0.32, 1] as const;
 
@@ -51,6 +52,201 @@ function paint(
     model: { model },
     material: { color, emissive, _p0: 0, _p1: 0, _p2: 0 },
   });
+}
+
+/** Column-major T * Rz * Ry * S so world lean follows facing yaw. */
+function trs(
+  x: number,
+  y: number,
+  z: number,
+  rotY: number,
+  rotZ: number,
+  sx: number,
+  sy: number,
+  sz: number,
+): Float32Array {
+  const cy = Math.cos(rotY);
+  const syr = Math.sin(rotY);
+  const cz = Math.cos(rotZ);
+  const szr = Math.sin(rotZ);
+  return new Float32Array([
+    cz * cy * sx,
+    szr * cy * sx,
+    -syr * sx,
+    0,
+    -szr * sy,
+    cz * sy,
+    0,
+    0,
+    cz * syr * sz,
+    szr * syr * sz,
+    cy * sz,
+    0,
+    x,
+    y,
+    z,
+    1,
+  ]);
+}
+
+function leanXY(x: number, y: number, rotZ: number): [number, number] {
+  const c = Math.cos(rotZ);
+  const s = Math.sin(rotZ);
+  return [x * c - y * s, x * s + y * c];
+}
+
+type FighterAnim = {
+  sx: number;
+  sy: number;
+  bob: number;
+  breath: number;
+  lean: number;
+  yaw: number;
+  headX: number;
+  headY: number;
+  headZ: number;
+  leadX: number;
+  leadY: number;
+  leadZ: number;
+  rearX: number;
+  rearY: number;
+  rearZ: number;
+  leadGlow: number;
+};
+
+function fighterAnim(f: Fighter, tick: number): FighterAnim {
+  const face = f.facing;
+  const speed = Math.abs(f.vx);
+  const air = !f.grounded;
+  const jab = f.attackKind === 1;
+  const special = f.attackKind === 2;
+  const stunned = f.hitstun > 0;
+  const runAmt =
+    f.grounded && !jab && !special && !stunned ? Math.min(1, Math.max(0, (speed - 0.45) / 3.4)) : 0;
+  const idle = f.grounded && runAmt < 0.12 && !jab && !special && !stunned;
+
+  const breath = Math.sin(tick * 0.085) * (idle ? 0.038 : 0.012);
+  const headDriftX = idle ? Math.sin(tick * 0.053) * 0.032 : 0;
+  const headDriftZ = idle ? Math.cos(tick * 0.041) * 0.036 : 0;
+
+  let sx: number;
+  let sy: number;
+  if (air) {
+    const takeoff = Math.max(0, 1 - f.squash);
+    sy = 1 + takeoff * 0.95;
+    sx = 1 - takeoff * 0.38;
+    if (f.y > 1.15) {
+      const loft = Math.min(0.14, (f.y - 1.15) * 0.035);
+      sy += loft;
+      sx -= loft * 0.45;
+    }
+  } else {
+    sy = f.squash;
+    sx = 2 - f.squash;
+  }
+
+  const phase = tick * (0.3 + 0.1 * runAmt);
+  const swing = Math.sin(phase) * runAmt;
+  const pump = Math.cos(phase) * runAmt;
+  const bob = Math.abs(Math.sin(phase)) * 0.05 * runAmt;
+
+  let lean = Math.max(-0.48, Math.min(0.48, -f.vx * 0.042));
+  if (air) lean *= 0.4;
+
+  let twist = 0;
+  let leadX = 0.16 + swing * 0.34;
+  let leadY = 0.7 + pump * 0.09;
+  let leadZ = 0.22;
+  let rearX = -0.14 - swing * 0.34;
+  let rearY = 0.68 - pump * 0.09;
+  let rearZ = -0.18;
+  let leadGlow = 0;
+
+  if (air && !jab && !special && !stunned) {
+    const lift = Math.min(1, 0.4 + Math.max(0, f.y) * 0.1);
+    leadX = 0.14;
+    leadY = 0.86 + lift * 0.14;
+    leadZ = 0.26;
+    rearX = -0.16;
+    rearY = 0.8 + lift * 0.12;
+    rearZ = -0.22;
+  }
+
+  if (jab) {
+    const frame = 18 - f.attack;
+    const punch =
+      frame < 3 ? (frame / 3) * 0.22 : frame < 5 ? 0.22 + ((frame - 3) / 2) * 0.78 : frame <= 10 ? 1 : Math.max(0, 1 - (frame - 10) / 7);
+    twist = 0.52 * punch;
+    lean += -face * 0.14 * punch;
+    leadX = 0.16 + punch * 0.5;
+    leadY = 0.72 + punch * 0.05;
+    leadZ = 0.16;
+    rearX = -0.18 - punch * 0.2;
+    rearY = 0.62 - punch * 0.04;
+    rearZ = -0.1;
+    leadGlow = frame >= 4 && frame <= 10 ? 0.4 : punch * 0.12;
+  } else if (special) {
+    const frame = 16 - f.attack;
+    if (frame < 6) {
+      const wind = (frame / 6) * (frame / 6);
+      twist = -0.28 * wind;
+      lean += face * 0.22 * wind;
+      leadX = 0.1 - wind * 0.32;
+      leadY = 0.74 + wind * 0.16;
+      leadZ = 0.12;
+      rearX = -0.08 + wind * 0.06;
+      rearY = 0.64;
+      rearZ = -0.14;
+      sy *= 1 - wind * 0.08;
+      sx *= 1 + wind * 0.06;
+      leadGlow = 0.08 * wind;
+    } else {
+      const thrust = Math.min(1, (frame - 6) / 4);
+      twist = 0.38 * thrust;
+      lean += -face * 0.26 * thrust;
+      leadX = -0.22 + thrust * 0.78;
+      leadY = 0.9 - thrust * 0.12;
+      leadZ = 0.18;
+      rearX = -0.16 - thrust * 0.1;
+      rearY = 0.6;
+      rearZ = -0.12;
+      leadGlow = 0.12 + thrust * 0.28;
+    }
+  }
+
+  if (stunned) {
+    const k = Math.min(1, f.hitstun / 20);
+    const knock = Math.abs(f.vx) > 0.25 ? Math.sign(f.vx) : -face;
+    lean = -knock * 0.42 * k + lean * 0.2;
+    twist = Math.sin(tick * 0.55) * 0.18 * k;
+    leadX = -0.06 + Math.sin(tick * 0.72) * 0.14 * k;
+    leadY = 0.9 + Math.cos(tick * 0.8) * 0.1 * k;
+    leadZ = 0.24;
+    rearX = 0.04 + Math.cos(tick * 0.72) * 0.14 * k;
+    rearY = 0.86 + Math.sin(tick * 0.8) * 0.1 * k;
+    rearZ = -0.2;
+    leadGlow = 0;
+  }
+
+  const yaw = (face < 0 ? Math.PI : 0) + twist;
+  return {
+    sx,
+    sy,
+    bob,
+    breath,
+    lean,
+    yaw,
+    headX: face * (0.04 + headDriftX + twist * 0.14),
+    headY: 1.28 * sy + breath * 1.35 + bob,
+    headZ: 0.08 + headDriftZ,
+    leadX: face * leadX,
+    leadY: leadY * sy + breath + bob,
+    leadZ,
+    rearX: face * rearX,
+    rearY: rearY * sy + breath + bob,
+    rearZ,
+    leadGlow,
+  };
 }
 
 let rendererEpoch = 0;
@@ -141,7 +337,8 @@ export async function startRenderer(
   const pillarR = makeMesh(gpu, boxGeom);
   const bodies = [makeMesh(gpu, bodyGeom), makeMesh(gpu, bodyGeom)];
   const heads = [makeMesh(gpu, ballGeom), makeMesh(gpu, ballGeom)];
-  const fists = [makeMesh(gpu, ballGeom), makeMesh(gpu, ballGeom)];
+  const leadFists = [makeMesh(gpu, ballGeom), makeMesh(gpu, ballGeom)];
+  const rearFists = [makeMesh(gpu, ballGeom), makeMesh(gpu, ballGeom)];
   const orbs = [makeMesh(gpu, ballGeom), makeMesh(gpu, ballGeom)];
 
   const sparks = draw(gpu, {
@@ -219,36 +416,43 @@ export async function startRenderer(
     for (let i = 0; i < 2; i++) {
       const f = match.fighters[i];
       const vis = f.alive && (f.invuln <= 0 || Math.floor(match.tick / 4) % 2 === 0);
-      const s = vis ? f.squash : 0.0001;
-      const bodyH = 0.8 * s;
+      const hide = vis ? 1 : 0.0001;
+      const pose = fighterAnim(f, match.tick);
+      const bodyH = 0.8 * pose.sy * hide;
+      const bodyR = 0.7 * pose.sx * hide;
+      const [bx, by] = leanXY(0, bodyH + pose.breath + pose.bob, pose.lean);
       paint(
         bodies[i],
         vp,
-        compose(f.x, f.y + bodyH, 0, f.facing < 0 ? Math.PI : 0, 0.7 * s, bodyH, 0.7 * s),
+        trs(f.x + bx, f.y + by, 0, pose.yaw, pose.lean, bodyR, bodyH, bodyR),
         colors[i],
       );
+      const [hx, hy] = leanXY(pose.headX, pose.headY, pose.lean);
+      const hs = 0.42 * hide;
       paint(
         heads[i],
         vp,
-        compose(f.x + f.facing * 0.04, f.y + 1.28 * s, 0.08, 0, 0.42 * s, 0.42 * s, 0.42 * s),
+        compose(f.x + hx, f.y + hy, pose.headZ, pose.yaw, hs * pose.sx, hs * pose.sy, hs * pose.sx),
         colors[i],
         0.08,
       );
-      const punch = f.attackKind === 1 ? 0.55 : 0.18;
+      const [lx, ly] = leanXY(pose.leadX, pose.leadY, pose.lean);
+      const fs = 0.22 * hide;
       paint(
-        fists[i],
+        leadFists[i],
         vp,
-        compose(
-          f.x + f.facing * punch,
-          f.y + 0.72 * s,
-          0.22,
-          0,
-          0.22 * s,
-          0.22 * s,
-          0.22 * s,
-        ),
-        [1, 0.92, 0.85, 1],
-        f.attackKind === 1 ? 0.4 : 0,
+        compose(f.x + lx, f.y + ly, pose.leadZ, 0, fs * pose.sx, fs * pose.sy, fs * pose.sx),
+        SKIN,
+        pose.leadGlow,
+      );
+      const [rx, ry] = leanXY(pose.rearX, pose.rearY, pose.lean);
+      const rs = 0.2 * hide;
+      paint(
+        rearFists[i],
+        vp,
+        compose(f.x + rx, f.y + ry, pose.rearZ, 0, rs * pose.sx, rs * pose.sy, rs * pose.sx),
+        SKIN,
+        0,
       );
       const p = match.projectiles[i];
       const ps = p.active ? 0.38 : 0.0001;
@@ -289,7 +493,8 @@ export async function startRenderer(
         for (let i = 0; i < 2; i++) {
           pass.draw(bodies[i]);
           pass.draw(heads[i]);
-          pass.draw(fists[i]);
+          pass.draw(rearFists[i]);
+          pass.draw(leadFists[i]);
           if (match.projectiles[i].active) pass.draw(orbs[i]);
         }
         if (match.hitAge < 0.5) pass.draw(sparks);

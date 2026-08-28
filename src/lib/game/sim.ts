@@ -53,6 +53,7 @@ export function createMatch(): Match {
     hitY: 0,
     hitAge: 99,
     started: false,
+    sfx: [],
   };
 }
 
@@ -70,6 +71,7 @@ export function cloneSnapshot(match: Match): Snapshot {
     hitY: match.hitY,
     hitAge: match.hitAge,
     started: match.started,
+    sfx: Array.isArray(match.sfx) ? match.sfx.slice() : [],
   };
 }
 
@@ -86,6 +88,7 @@ export function applySnapshot(match: Match, snap: Snapshot): void {
   match.hitY = snap.hitY;
   match.hitAge = snap.hitAge;
   match.started = snap.started;
+  match.sfx = Array.isArray(snap.sfx) ? snap.sfx.slice() : [];
 }
 
 function onPlatform(x: number, y: number, vy: number): boolean {
@@ -139,7 +142,7 @@ function respawn(f: Fighter, slot: 0 | 1): void {
   f.facing = slot === 0 ? 1 : -1;
 }
 
-function stepFighter(f: Fighter, input: InputBits, prev: InputBits, slot: 0 | 1): void {
+function stepFighter(f: Fighter, input: InputBits, prev: InputBits, slot: 0 | 1, sfx: string[]): void {
   if (!f.alive) {
     if (f.stocks <= 0) return;
     f.respawn -= 1;
@@ -177,10 +180,12 @@ function stepFighter(f: Fighter, input: InputBits, prev: InputBits, slot: 0 | 1)
         f.grounded = false;
         f.jumps = 1;
         f.squash = 0.72;
+        sfx.push("jump");
       } else if (f.jumps > 0) {
         f.vy = 13.6;
         f.jumps -= 1;
         f.squash = 0.78;
+        sfx.push("doublejump");
       }
     }
 
@@ -190,10 +195,12 @@ function stepFighter(f: Fighter, input: InputBits, prev: InputBits, slot: 0 | 1)
       if (atkEdge) {
         f.attack = 18;
         f.attackKind = 1;
+        sfx.push("jab");
       } else if (spEdge && f.specialCd <= 0) {
         f.attack = 16;
         f.attackKind = 2;
         f.specialCd = 42;
+        sfx.push("special");
       }
     }
   }
@@ -213,7 +220,10 @@ function stepFighter(f: Fighter, input: InputBits, prev: InputBits, slot: 0 | 1)
 
   if (onPlatform(f.x, f.y, f.vy)) {
     f.y = STAGE.y;
-    if (f.vy < -8) f.squash = 0.7;
+    if (f.vy < -8) {
+      f.squash = 0.7;
+      sfx.push("land");
+    }
     f.vy = 0;
     f.grounded = true;
     f.jumps = 1;
@@ -232,6 +242,7 @@ function stepFighter(f: Fighter, input: InputBits, prev: InputBits, slot: 0 | 1)
     f.vx = 0;
     f.vy = 0;
     f.attack = 0;
+    sfx.push("ko", "blast");
   }
 }
 
@@ -250,6 +261,7 @@ function activeHitbox(f: Fighter): { x: number; y: number; w: number; h: number;
 }
 
 export function stepMatch(match: Match, inputs: [InputBits, InputBits]): void {
+  if (!match.sfx) match.sfx = [];
   if (match.winner !== null) {
     match.shake *= 0.9;
     match.flash *= 0.9;
@@ -258,10 +270,15 @@ export function stepMatch(match: Match, inputs: [InputBits, InputBits]): void {
   }
 
   if (!match.started) {
+    const prevCeil = Math.ceil(match.countdown);
+    const opening = match.countdown === 3;
     match.countdown -= DT;
     if (match.countdown <= 0) {
       match.started = true;
       match.countdown = 0;
+      match.sfx.push("go");
+    } else if (opening || Math.ceil(match.countdown) !== prevCeil) {
+      match.sfx.push("tick");
     }
   }
 
@@ -283,8 +300,8 @@ export function stepMatch(match: Match, inputs: [InputBits, InputBits]): void {
   match.tick += 1;
   const [a, b] = match.fighters;
 
-  stepFighter(a, inputs[0], match.prevInput[0], 0);
-  stepFighter(b, inputs[1], match.prevInput[1], 1);
+  stepFighter(a, inputs[0], match.prevInput[0], 0, match.sfx);
+  stepFighter(b, inputs[1], match.prevInput[1], 1, match.sfx);
 
   for (let i = 0; i < 2; i++) {
     const f = match.fighters[i];
@@ -319,6 +336,7 @@ export function stepMatch(match: Match, inputs: [InputBits, InputBits]): void {
       match.hitY = hb.y;
       match.hitAge = 0;
       attacker.squash = 1.12;
+      match.sfx.push("hit");
     }
 
     const p = match.projectiles[i];
@@ -334,12 +352,14 @@ export function stepMatch(match: Match, inputs: [InputBits, InputBits]): void {
       match.hitX = p.x;
       match.hitY = p.y;
       match.hitAge = 0;
+      match.sfx.push("hit");
     }
   }
 
   if (a.stocks <= 0 && !a.alive) match.winner = 1;
   if (b.stocks <= 0 && !b.alive) match.winner = 0;
   if (a.stocks <= 0 && b.stocks <= 0) match.winner = 0;
+  if (match.winner !== null) match.sfx.push("win");
 
   match.prevInput = inputs;
 }
