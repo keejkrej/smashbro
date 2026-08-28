@@ -1,0 +1,5 @@
+allowBuilds:
+  '@vgpu/adapter-node': set this to true or false
+  sharp: false
+  unrs-resolver: false
+  webgpu: set this to true or false

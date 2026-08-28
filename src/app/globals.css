@@ -1,0 +1,32 @@
+@import "tailwindcss";
+
+:root {
+  --background: #07060b;
+  --foreground: #f6f3ee;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-display: var(--font-display), "Arial Black", sans-serif;
+}
+
+html,
+body {
+  height: 100%;
+  background: var(--background);
+  color: var(--foreground);
+}
+
+body {
+  font-family: var(--font-sans), system-ui, sans-serif;
+}
+
+.font-display {
+  font-family: var(--font-display);
+}
+
+canvas {
+  display: block;
+}
