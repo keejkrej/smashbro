@@ -1,15 +1,42 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useState, useSyncExternalStore } from "react";
 import { normalizeRoomCode, randomRoomCode } from "@/lib/game/codes";
+import { PLAYER_NAME_KEY } from "@/lib/net/client";
+
+const subscribeName = () => () => {};
+const readStoredName = () => {
+  try {
+    return sessionStorage.getItem(PLAYER_NAME_KEY) ?? "";
+  } catch {
+    return "";
+  }
+};
 
 export function Lobby() {
   const router = useRouter();
   const [code, setCode] = useState("");
+  const storedName = useSyncExternalStore(subscribeName, readStoredName, () => "");
+  const [nameDraft, setNameDraft] = useState<string | null>(null);
+  const name = nameDraft ?? storedName;
 
-  const create = () => router.push(`/r/${randomRoomCode()}`);
+  const persistName = (value: string) => {
+    const next = value.slice(0, 24);
+    setNameDraft(next);
+    try {
+      sessionStorage.setItem(PLAYER_NAME_KEY, next.trim());
+    } catch {
+      /* private mode */
+    }
+  };
+
+  const create = () => {
+    persistName(name);
+    router.push(`/r/${randomRoomCode()}`);
+  };
   const join = () => {
+    persistName(name);
     const next = normalizeRoomCode(code);
     if (next.length >= 4) router.push(`/r/${next}`);
   };
@@ -30,6 +57,13 @@ export function Lobby() {
         </p>
 
         <div className="mt-10 flex flex-col gap-3">
+          <input
+            value={name}
+            onChange={(e) => persistName(e.target.value)}
+            maxLength={24}
+            placeholder="YOUR NAME"
+            className="rounded-full border border-white/15 bg-black/40 px-4 py-3 text-center tracking-[0.2em] text-white outline-none placeholder:text-white/30"
+          />
           <button
             type="button"
             onClick={create}

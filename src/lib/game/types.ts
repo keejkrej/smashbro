@@ -9,6 +9,7 @@ export const IN = {
   JUMP: 1 << 3,
   ATTACK: 1 << 4,
   SPECIAL: 1 << 5,
+  SHIELD: 1 << 6,
 } as const;
 
 export type InputBits = number;
@@ -26,11 +27,16 @@ export type Fighter = {
   hitstun: number;
   invuln: number;
   attack: number;
-  attackKind: 0 | 1 | 2;
+  attackKind: 0 | 1 | 2 | 3;
   specialCd: number;
   alive: boolean;
   respawn: number;
   squash: number;
+  smashCharge: number;
+  shielding: boolean;
+  shieldHp: number;
+  dodge: number;
+  airDodge: boolean;
 };
 
 export type Projectile = {

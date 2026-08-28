@@ -8,6 +8,8 @@ const P1: Record<string, number> = {
   Space: IN.JUMP,
   KeyJ: IN.ATTACK,
   KeyK: IN.SPECIAL,
+  KeyL: IN.SHIELD,
+  ShiftLeft: IN.SHIELD,
 };
 
 const P2: Record<string, number> = {
@@ -19,6 +21,8 @@ const P2: Record<string, number> = {
   Period: IN.ATTACK,
   Numpad2: IN.SPECIAL,
   Slash: IN.SPECIAL,
+  ShiftRight: IN.SHIELD,
+  Numpad0: IN.SHIELD,
 };
 
 export type InputSampler = {

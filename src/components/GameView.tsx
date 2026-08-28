@@ -5,7 +5,7 @@ import { initSfx, play, unlockSfx } from "@/lib/audio/sfx";
 import { createInputSampler } from "@/lib/game/input";
 import { applySnapshot, cloneSnapshot, createMatch, dummyInput, resetMatch, stepMatch } from "@/lib/game/sim";
 import { TICK_HZ, type Match, type Snapshot } from "@/lib/game/types";
-import { clientId, connectRoom, type RoomClient } from "@/lib/net/client";
+import { clientId, connectRoom, playerName, type RoomClient } from "@/lib/net/client";
 import { startRenderer } from "@/lib/render/engine";
 import { describeGpuError } from "@/lib/render/gpu-error";
 import { HUD, type HudInfo } from "./HUD";
@@ -13,6 +13,7 @@ import { HUD, type HudInfo } from "./HUD";
 const subscribeOrigin = () => () => {};
 const getOrigin = () => window.location.origin;
 const getServerOrigin = () => "";
+const CHARS = ["Ember", "Volt"] as const;
 
 function playSfx(names: readonly string[] | undefined): void {
   if (!names || names.length === 0) return;
@@ -21,10 +22,20 @@ function playSfx(names: readonly string[] | undefined): void {
 
 export type PlayMode = "online" | "local" | "training";
 
+function titled(player: string | null | undefined, character: string): string {
+  return `${player?.trim() || "Fighter"} · ${character}`;
+}
+
+function localNames(mode: PlayMode): [string, string] {
+  const me = typeof window === "undefined" ? "Fighter" : playerName();
+  return [titled(me, CHARS[0]), mode === "training" ? "Dummy" : CHARS[1]];
+}
+
 export function GameView({ mode, room }: { mode: PlayMode; room?: string }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const matchRef = useRef<Match>(createMatch());
   const rematchRef = useRef<() => void>(() => {});
+  const readyRef = useRef<() => void>(() => {});
   const [view, setView] = useState<Snapshot>(() => cloneSnapshot(createMatch()));
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -35,11 +46,20 @@ export function GameView({ mode, room }: { mode: PlayMode; room?: string }) {
     slot: 0 | 1 | null;
     waiting: boolean;
     status: string;
+    needReady: boolean;
+    iAmReady: boolean;
+    rematchWaiting: boolean;
   }>({
-    names: mode === "online" ? ["Ember", "Volt"] : ["Ember", mode === "training" ? "Dummy" : "Volt"],
+    names:
+      mode === "training"
+        ? [titled("Fighter", CHARS[0]), "Dummy"]
+        : [titled("Fighter", CHARS[0]), mode === "online" ? titled("Fighter", CHARS[1]) : CHARS[1]],
     slot: mode === "online" ? null : 0,
     waiting: mode === "online",
     status: mode === "online" ? "Connecting…" : "Fight!",
+    needReady: false,
+    iAmReady: false,
+    rematchWaiting: false,
   });
 
   useEffect(() => {
@@ -63,55 +83,113 @@ export function GameView({ mode, room }: { mode: PlayMode; room?: string }) {
     let sfxRead = 0;
     let slot: 0 | 1 = 0;
     let filled: [boolean, boolean] = mode === "online" ? [false, false] : [true, true];
-    let names: [string, string] = [
-      "Ember",
-      mode === "training" ? "Dummy" : "Volt",
-    ];
+    let names: [string, string] = localNames(mode);
+    if (mode === "online") names = [titled("Fighter", CHARS[0]), titled("Fighter", CHARS[1])];
     let remoteBits = 0;
-    let hostReady = mode !== "online";
+    let playerReady: [boolean, boolean] = mode === "online" ? [false, false] : [true, true];
+    let rematchAsk: [boolean, boolean] = [false, false];
+    let roundLive = mode !== "online";
     let client: RoomClient | null = null;
     let ticks = 0;
     let stopped = false;
     let rendererStop: (() => void) | null = null;
-    rematchRef.current = () => {
-      resetMatch(match);
-      sfxRead = 0;
-      client?.send({ type: "rematch" });
-      setView(cloneSnapshot(match));
-    };
 
-    const refreshHud = (status: string, waiting = !filled[0] || !filled[1]) => {
+    const bothFilled = () => filled[0] && filled[1];
+    const bothReady = () => playerReady[0] && playerReady[1];
+
+    const refreshHud = (status: string) => {
+      const waiting = mode === "online" && (!bothFilled() || !bothReady());
       setHudExtra({
         names,
         slot: mode === "online" ? slot : 0,
-        waiting: mode === "online" && waiting,
+        waiting,
         status,
+        needReady: mode === "online" && bothFilled() && !bothReady(),
+        iAmReady: playerReady[slot],
+        rematchWaiting: mode === "online" && rematchAsk[slot] && match.winner !== null,
       });
       setView(cloneSnapshot(match));
+    };
+
+    const applyRosterNames = (raw: [string | null, string | null]) => {
+      names = [titled(raw[0], CHARS[0]), titled(raw[1], CHARS[1])];
+    };
+
+    const hostReset = () => {
+      resetMatch(match);
+      sfxRead = 0;
+      remoteBits = 0;
+    };
+
+    const tryStartFromReady = () => {
+      if (mode !== "online" || !bothFilled() || !bothReady() || roundLive) return;
+      roundLive = true;
+      if (slot === 0) hostReset();
+      refreshHud("Get ready");
+    };
+
+    const tryHostRematch = () => {
+      if (slot !== 0 || !rematchAsk[0] || !rematchAsk[1]) return;
+      hostReset();
+      rematchAsk = [false, false];
+      playerReady = [true, true];
+      roundLive = true;
+      refreshHud("Get ready");
+    };
+
+    rematchRef.current = () => {
+      if (mode !== "online") {
+        hostReset();
+        refreshHud("Get ready");
+        return;
+      }
+      if (rematchAsk[slot] || match.winner === null) return;
+      rematchAsk[slot] = true;
+      client?.send({ type: "rematch" });
+      if (slot === 0 && rematchAsk[0] && rematchAsk[1]) {
+        tryHostRematch();
+        return;
+      }
+      refreshHud("Waiting for opponent");
+    };
+
+    readyRef.current = () => {
+      if (mode !== "online" || playerReady[slot] || !bothFilled()) return;
+      playerReady[slot] = true;
+      client?.send({ type: "ready" });
+      tryStartFromReady();
+      refreshHud(bothReady() ? "Get ready" : "Waiting for opponent");
     };
 
     if (mode === "online" && room) {
       const id = clientId();
       client = connectRoom({
         room,
-        name: "Fighter",
+        name: playerName(),
         clientId: id,
         onEvent: (event) => {
           if (event.type === "welcome") {
             slot = event.slot;
             filled[slot] = true;
-            names = ["Ember", "Volt"];
+            names[slot] = titled(playerName(), CHARS[slot]);
             refreshHud(event.slot === 0 ? "You host this room" : "Joined — waiting for host state");
           } else if (event.type === "roster") {
-            const wasReady = filled[0] && filled[1];
             filled = event.filled;
-            names = ["Ember", "Volt"];
-            hostReady = filled[0] && filled[1];
-            if (!wasReady && hostReady && slot === 0) {
-              resetMatch(match);
-              sfxRead = 0;
+            applyRosterNames(event.names);
+            if (!bothFilled()) {
+              playerReady = [false, false];
+              rematchAsk = [false, false];
+              roundLive = false;
             }
-            refreshHud(hostReady ? "Get ready" : "Waiting for a challenger", !hostReady);
+            refreshHud(
+              bothFilled()
+                ? bothReady()
+                  ? "Get ready"
+                  : playerReady[slot]
+                    ? "Waiting for opponent"
+                    : "Get ready"
+                : "Waiting for a challenger",
+            );
           } else if (event.type === "relay") {
             if (event.event.type === "input" && slot === 0) {
               remoteBits = event.event.bits;
@@ -120,21 +198,36 @@ export function GameView({ mode, room }: { mode: PlayMode; room?: string }) {
               playSfx(match.sfx);
               match.sfx.length = 0;
               sfxRead = 0;
+              if (match.winner === null) rematchAsk = [false, false];
+              refreshHud(
+                match.winner !== null
+                  ? "Match over"
+                  : match.started
+                    ? "Fight!"
+                    : "Get ready",
+              );
+            } else if (event.event.type === "ready") {
+              playerReady[event.from] = true;
+              tryStartFromReady();
+              refreshHud(bothReady() ? "Get ready" : "Waiting for opponent");
             } else if (event.event.type === "rematch") {
-              resetMatch(match);
-              sfxRead = 0;
-              remoteBits = 0;
-              setView(cloneSnapshot(match));
+              rematchAsk[event.from] = true;
+              tryHostRematch();
+              refreshHud(rematchAsk[slot] ? "Waiting for opponent" : "Match over");
             }
           } else if (event.type === "left") {
             filled[event.slot] = false;
-            hostReady = false;
-            refreshHud("Opponent left", true);
+            playerReady = [false, false];
+            rematchAsk = [false, false];
+            roundLive = false;
+            refreshHud("Opponent left");
           } else if (event.type === "error") {
             setError(event.message);
           }
         },
       });
+    } else {
+      refreshHud("Fight!");
     }
 
     void (async () => {
@@ -156,7 +249,7 @@ export function GameView({ mode, room }: { mode: PlayMode; room?: string }) {
       const online = mode === "online";
       const isHost = !online || slot === 0;
 
-      if (online && (!filled[0] || !filled[1])) return;
+      if (online && (!filled[0] || !filled[1] || !playerReady[0] || !playerReady[1])) return;
 
       if (isHost) {
         const p1 = input.readP1();
@@ -183,14 +276,18 @@ export function GameView({ mode, room }: { mode: PlayMode; room?: string }) {
         client?.send({ type: "input", bits: input.readP1(), seq: ticks++ });
       }
 
+      if (match.winner === null && (rematchAsk[0] || rematchAsk[1])) {
+        rematchAsk = [false, false];
+      }
       if (ticks % 4 === 0) {
         refreshHud(
           match.winner !== null
-            ? "Match over"
+            ? rematchAsk[slot]
+              ? "Waiting for opponent"
+              : "Match over"
             : match.started
               ? "Fight!"
               : "Get ready",
-          online && (!filled[0] || !filled[1]),
         );
       }
     }, 1000 / TICK_HZ);
@@ -213,6 +310,9 @@ export function GameView({ mode, room }: { mode: PlayMode; room?: string }) {
     status: copied ? "Link copied" : hudExtra.status,
     shareUrl,
     waiting: hudExtra.waiting,
+    needReady: hudExtra.needReady,
+    iAmReady: hudExtra.iAmReady,
+    rematchWaiting: hudExtra.rematchWaiting,
   };
 
   return (
@@ -229,6 +329,7 @@ export function GameView({ mode, room }: { mode: PlayMode; room?: string }) {
             window.setTimeout(() => setCopied(false), 1600);
           }}
           onRematch={() => rematchRef.current()}
+          onReady={() => readyRef.current()}
         />
       )}
       {error && (

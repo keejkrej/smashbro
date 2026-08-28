@@ -1,9 +1,20 @@
 import { parseEvent, type ClientEvent, type ServerEvent } from "./protocol";
 
+export const PLAYER_NAME_KEY = "smashbro.playerName";
+
 export type RoomClient = {
   send: (event: ClientEvent) => void;
   close: () => void;
 };
+
+export function playerName(): string {
+  if (typeof window === "undefined") return "Fighter";
+  try {
+    return window.sessionStorage.getItem(PLAYER_NAME_KEY)?.trim().slice(0, 24) || "Fighter";
+  } catch {
+    return "Fighter";
+  }
+}
 
 export function connectRoom(opts: {
   room: string;
@@ -16,6 +27,7 @@ export function connectRoom(opts: {
   let es: EventSource | null = null;
   let mode: "ws" | "sse" | null = null;
   let opened = false;
+  const name = opts.name.trim().slice(0, 24) || "Fighter";
 
   const proto = location.protocol === "https:" ? "wss" : "ws";
   const wsUrl = `${proto}://${location.host}/api/ws`;
@@ -39,14 +51,14 @@ export function connectRoom(opts: {
     send({
       type: "join",
       clientId: opts.clientId,
-      name: opts.name,
+      name,
       room: opts.room,
     });
 
   const fallbackSse = () => {
     if (closed || mode === "sse") return;
     mode = "sse";
-    const url = `/api/rooms/${encodeURIComponent(opts.room)}/events?clientId=${encodeURIComponent(opts.clientId)}&name=${encodeURIComponent(opts.name)}`;
+    const url = `/api/rooms/${encodeURIComponent(opts.room)}/events?clientId=${encodeURIComponent(opts.clientId)}&name=${encodeURIComponent(name)}`;
     es = new EventSource(url);
     es.onmessage = (ev) => {
       const event = parseEvent<ServerEvent>(ev.data);

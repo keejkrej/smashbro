@@ -4,6 +4,11 @@ export type SfxName =
   | "land"
   | "jab"
   | "special"
+  | "smash"
+  | "smashcharge"
+  | "shield"
+  | "dodge"
+  | "shieldbreak"
   | "hit"
   | "ko"
   | "blast"
@@ -277,6 +282,56 @@ const voices: Record<SfxName, Voice> = {
     osc(ctx, dest, t0 + 0.08, 0.09, "square", 1320, 420, d + 20, 0.16 * g, 0.002, 0.03, 0.12, 0.04);
     click(ctx, dest, t0 + 0.086, 2440, d, 0.14 * g);
     return 0.2;
+  },
+
+  smash(ctx, dest, t0, opts) {
+    const g = opts.gain ?? 1;
+    const d = (opts.detune ?? 0) + (Math.random() * 24 - 12);
+    noise(ctx, dest, t0, 0.12, 0.48 * g, 0.004, 0.04, "bandpass", 1600, 380, 1.1, d);
+    noise(ctx, dest, t0, 0.08, 0.22 * g, 0.002, 0.03, "highpass", 2400, 900, 0.5, d);
+    osc(ctx, dest, t0, 0.16, "sawtooth", 220, 72, d, 0.32 * g, 0.003, 0.06, 0.22, 0.08);
+    osc(ctx, dest, t0, 0.12, "square", 110, 48, d, 0.2 * g, 0.002, 0.05, 0.18, 0.06);
+    click(ctx, dest, t0 + 0.022, 1480, d, 0.28 * g);
+    return 0.18;
+  },
+
+  smashcharge(ctx, dest, t0, opts) {
+    const g = opts.gain ?? 1;
+    const d = opts.detune ?? 0;
+    osc(ctx, dest, t0, 0.28, "sawtooth", 92, 420, d, 0.16 * g, 0.02, 0.12, 0.45, 0.1);
+    osc(ctx, dest, t0, 0.3, "triangle", 184, 640, d + 6, 0.14 * g, 0.018, 0.12, 0.4, 0.12);
+    noise(ctx, dest, t0 + 0.04, 0.22, 0.14 * g, 0.02, 0.1, "bandpass", 520, 1800, 2.4, d);
+    return 0.32;
+  },
+
+  shield(ctx, dest, t0, opts) {
+    const g = opts.gain ?? 1;
+    const d = opts.detune ?? 0;
+    osc(ctx, dest, t0, 0.14, "sine", 520, 880, d, 0.2 * g, 0.006, 0.05, 0.3, 0.08);
+    osc(ctx, dest, t0, 0.16, "triangle", 780, 1240, d + 10, 0.12 * g, 0.008, 0.06, 0.28, 0.08);
+    noise(ctx, dest, t0, 0.09, 0.1 * g, 0.006, 0.04, "bandpass", 2400, 1600, 2.8, d);
+    return 0.18;
+  },
+
+  dodge(ctx, dest, t0, opts) {
+    const g = opts.gain ?? 1;
+    const d = opts.detune ?? 0;
+    noise(ctx, dest, t0, 0.1, 0.28 * g, 0.004, 0.04, "bandpass", 1800, 480, 1.2, d);
+    osc(ctx, dest, t0, 0.09, "triangle", 420, 180, d, 0.16 * g, 0.003, 0.035, 0.18, 0.04);
+    osc(ctx, dest, t0, 0.07, "sine", 880, 240, d, 0.08 * g, 0.002, 0.03, 0.12, 0.03);
+    return 0.12;
+  },
+
+  shieldbreak(ctx, dest, t0, opts) {
+    const g = opts.gain ?? 1;
+    const d = opts.detune ?? 0;
+    noise(ctx, dest, t0, 0.18, 0.55 * g, 0.002, 0.05, "highpass", 3200, 700, 0.6, d);
+    noise(ctx, dest, t0, 0.14, 0.32 * g, 0.002, 0.04, "bandpass", 1800, 400, 0.9, d);
+    osc(ctx, dest, t0, 0.22, "square", 340, 70, d, 0.22 * g, 0.003, 0.08, 0.22, 0.1);
+    osc(ctx, dest, t0, 0.18, "triangle", 980, 160, d + 12, 0.14 * g, 0.004, 0.07, 0.18, 0.08);
+    click(ctx, dest, t0, 2100, d, 0.2 * g);
+    click(ctx, dest, t0 + 0.03, 1540, d - 8, 0.14 * g);
+    return 0.28;
   },
 
   hit(ctx, dest, t0, opts) {

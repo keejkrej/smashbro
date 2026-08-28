@@ -4,6 +4,7 @@ export type ClientEvent =
   | { type: "join"; clientId: string; name: string; room: string }
   | { type: "input"; bits: number; seq: number }
   | { type: "state"; snapshot: Snapshot }
+  | { type: "ready" }
   | { type: "rematch" };
 
 export type ServerEvent =

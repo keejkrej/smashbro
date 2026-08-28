@@ -13,7 +13,7 @@ import {
   type Surface,
   type Target,
 } from "vgpu";
-import { box, capsule, perspectiveCamera, sphere } from "vgpu/scene";
+import { box, capsule, cone, perspectiveCamera, sphere } from "vgpu/scene";
 import { compose } from "@/lib/game/mat4";
 import { STAGE, type Fighter, type Match } from "@/lib/game/types";
 import skySource from "./shaders/sky.wgsl";
@@ -30,6 +30,29 @@ const P2 = [0.18, 0.72, 1.0, 1] as const;
 const SKIN = [1, 0.92, 0.85, 1] as const;
 const STAGE_COL = [0.16, 0.15, 0.22, 1] as const;
 const EDGE_COL = [1.0, 0.82, 0.32, 1] as const;
+const FLAME = [1.0, 0.55, 0.12, 1] as const;
+const VISOR = [0.42, 0.92, 1.0, 1] as const;
+const SHIELD_EMBER = [0.16, 0.05, 0.02, 1] as const;
+const SHIELD_VOLT = [0.03, 0.1, 0.16, 1] as const;
+
+function optNum(f: Fighter, key: string): number {
+  const v = (f as unknown as Record<string, unknown>)[key];
+  return typeof v === "number" && Number.isFinite(v) ? v : 0;
+}
+
+function optOn(f: Fighter, key: string): boolean {
+  const v = (f as unknown as Record<string, unknown>)[key];
+  if (v === true) return true;
+  return typeof v === "number" && Number.isFinite(v) && v > 0;
+}
+
+function smashPulse(f: Fighter, tick: number): number {
+  const charge = optNum(f, "smashCharge");
+  const swinging = Number(f.attackKind) === 3;
+  if (charge <= 0 && !swinging) return 0;
+  const amt = swinging ? 1 : Math.min(1, charge / 45);
+  return amt * (0.34 + 0.52 * (0.5 + 0.5 * Math.sin(tick * 0.48)));
+}
 
 function makeMesh(gpu: Gpu, geom: ReturnType<typeof geometry>): Draw {
   return draw(gpu, {
@@ -37,6 +60,16 @@ function makeMesh(gpu: Gpu, geom: ReturnType<typeof geometry>): Draw {
     geometry: geom,
     cull: "back",
     depth: { write: true, compare: "less-equal" },
+  });
+}
+
+function makeGlow(gpu: Gpu, geom: ReturnType<typeof geometry>): Draw {
+  return draw(gpu, {
+    shader: meshSource,
+    geometry: geom,
+    cull: "back",
+    blend: "additive",
+    depth: { write: false, compare: "less-equal" },
   });
 }
 
@@ -228,6 +261,21 @@ function fighterAnim(f: Fighter, tick: number): FighterAnim {
     leadGlow = 0;
   }
 
+  const dodge = optNum(f, "dodge") || (optOn(f, "dodge") ? 12 : 0);
+  if (dodge > 0) {
+    const amt = Math.min(1, dodge / 12);
+    const speed = Math.hypot(f.vx, f.vy);
+    if (speed > 0.05) {
+      const ax = Math.abs(f.vx) / speed;
+      const ay = Math.abs(f.vy) / speed;
+      sx *= 1 + amt * 0.62 * ax - amt * 0.28 * ay;
+      sy *= 1 + amt * 0.62 * ay - amt * 0.28 * ax;
+    } else {
+      sx *= 1 + amt * 0.45;
+      sy *= 1 - amt * 0.2;
+    }
+  }
+
   const yaw = (face < 0 ? Math.PI : 0) + twist;
   return {
     sx,
@@ -326,6 +374,7 @@ export async function startRenderer(
   const boxGeom = geometry(gpu, box({ size: 1 }));
   const bodyGeom = geometry(gpu, capsule({ radius: 0.5, height: 1, radialSegments: 18, heightSegments: 4 }));
   const ballGeom = geometry(gpu, sphere({ radius: 0.5, widthSegments: 16, heightSegments: 10 }));
+  const coneGeom = geometry(gpu, cone({ radius: 0.5, height: 1, radialSegments: 12, heightSegments: 1 }));
 
   const sky = draw(gpu, {
     shader: skySource,
@@ -340,6 +389,9 @@ export async function startRenderer(
   const leadFists = [makeMesh(gpu, ballGeom), makeMesh(gpu, ballGeom)];
   const rearFists = [makeMesh(gpu, ballGeom), makeMesh(gpu, ballGeom)];
   const orbs = [makeMesh(gpu, ballGeom), makeMesh(gpu, ballGeom)];
+  const emberCrest = makeMesh(gpu, coneGeom);
+  const voltFins = [makeMesh(gpu, boxGeom), makeMesh(gpu, boxGeom)];
+  const shields = [makeGlow(gpu, ballGeom), makeGlow(gpu, ballGeom)];
 
   const sparks = draw(gpu, {
     shader: particleSource,
@@ -418,6 +470,9 @@ export async function startRenderer(
       const vis = f.alive && (f.invuln <= 0 || Math.floor(match.tick / 4) % 2 === 0);
       const hide = vis ? 1 : 0.0001;
       const pose = fighterAnim(f, match.tick);
+      const pulse = smashPulse(f, match.tick);
+      const bodyGlow = (i === 0 ? 0.12 : 0.16) + pulse;
+      const headGlow = (i === 0 ? 0.18 : 0.22) + pulse * 1.15;
       const bodyH = 0.8 * pose.sy * hide;
       const bodyR = 0.7 * pose.sx * hide;
       const [bx, by] = leanXY(0, bodyH + pose.breath + pose.bob, pose.lean);
@@ -426,6 +481,7 @@ export async function startRenderer(
         vp,
         trs(f.x + bx, f.y + by, 0, pose.yaw, pose.lean, bodyR, bodyH, bodyR),
         colors[i],
+        bodyGlow,
       );
       const [hx, hy] = leanXY(pose.headX, pose.headY, pose.lean);
       const hs = 0.42 * hide;
@@ -434,8 +490,42 @@ export async function startRenderer(
         vp,
         compose(f.x + hx, f.y + hy, pose.headZ, pose.yaw, hs * pose.sx, hs * pose.sy, hs * pose.sx),
         colors[i],
-        0.08,
+        headGlow,
       );
+      if (i === 0) {
+        const flicker = 1 + 0.1 * Math.sin(match.tick * 0.73) + 0.06 * Math.sin(match.tick * 1.91);
+        const crestH = 0.4 * hide * pose.sy * flicker;
+        const crestR = 0.22 * hide * pose.sx;
+        const [cx, cy] = leanXY(pose.headX, pose.headY + 0.22 * pose.sy + crestH * 0.45, pose.lean);
+        paint(
+          emberCrest,
+          vp,
+          trs(f.x + cx, f.y + cy, pose.headZ, pose.yaw, pose.lean, crestR, crestH, crestR),
+          FLAME,
+          0.55 + 0.28 * flicker + pulse,
+        );
+      } else {
+        const finW = 0.07 * hide * pose.sx;
+        const finH = 0.2 * hide * pose.sy;
+        const finD = 0.36 * hide * pose.sx;
+        const finOff = 0.2 * pose.sx;
+        const [flx, fly] = leanXY(pose.headX - finOff, pose.headY + 0.02, pose.lean);
+        const [frx, fry] = leanXY(pose.headX + finOff, pose.headY + 0.02, pose.lean);
+        paint(
+          voltFins[0],
+          vp,
+          trs(f.x + flx, f.y + fly, pose.headZ + 0.02, pose.yaw, pose.lean, finW, finH, finD),
+          VISOR,
+          headGlow + 0.28 + pulse * 0.4,
+        );
+        paint(
+          voltFins[1],
+          vp,
+          trs(f.x + frx, f.y + fry, pose.headZ + 0.02, pose.yaw, pose.lean, finW, finH, finD),
+          VISOR,
+          headGlow + 0.28 + pulse * 0.4,
+        );
+      }
       const [lx, ly] = leanXY(pose.leadX, pose.leadY, pose.lean);
       const fs = 0.22 * hide;
       paint(
@@ -443,7 +533,7 @@ export async function startRenderer(
         vp,
         compose(f.x + lx, f.y + ly, pose.leadZ, 0, fs * pose.sx, fs * pose.sy, fs * pose.sx),
         SKIN,
-        pose.leadGlow,
+        pose.leadGlow + pulse * 0.6,
       );
       const [rx, ry] = leanXY(pose.rearX, pose.rearY, pose.lean);
       const rs = 0.2 * hide;
@@ -452,11 +542,20 @@ export async function startRenderer(
         vp,
         compose(f.x + rx, f.y + ry, pose.rearZ, 0, rs * pose.sx, rs * pose.sy, rs * pose.sx),
         SKIN,
-        0,
+        pulse * 0.25,
       );
       const p = match.projectiles[i];
       const ps = p.active ? 0.38 : 0.0001;
       paint(orbs[i], vp, compose(p.x, p.y, 0, time.time * 4, ps, ps, ps), colors[i], 0.8);
+      if (optOn(f, "shielding") && f.alive) {
+        paint(
+          shields[i],
+          vp,
+          trs(f.x + bx, f.y + by + 0.18 * pose.sy, 0, 0, pose.lean, 1.9, 2.4, 1.9),
+          i === 0 ? SHIELD_EMBER : SHIELD_VOLT,
+          0.22,
+        );
+      }
     }
 
     sparks.set({
@@ -493,9 +592,17 @@ export async function startRenderer(
         for (let i = 0; i < 2; i++) {
           pass.draw(bodies[i]);
           pass.draw(heads[i]);
+          if (i === 0) pass.draw(emberCrest);
+          else {
+            pass.draw(voltFins[0]);
+            pass.draw(voltFins[1]);
+          }
           pass.draw(rearFists[i]);
           pass.draw(leadFists[i]);
           if (match.projectiles[i].active) pass.draw(orbs[i]);
+        }
+        for (let i = 0; i < 2; i++) {
+          if (optOn(match.fighters[i], "shielding") && match.fighters[i].alive) pass.draw(shields[i]);
         }
         if (match.hitAge < 0.5) pass.draw(sparks);
       });

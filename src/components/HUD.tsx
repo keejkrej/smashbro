@@ -13,6 +13,9 @@ export type HudInfo = {
   status: string;
   shareUrl?: string;
   waiting: boolean;
+  needReady?: boolean;
+  iAmReady?: boolean;
+  rematchWaiting?: boolean;
 };
 
 function stocks(n: number, color: string) {
@@ -34,11 +37,12 @@ function stocks(n: number, color: string) {
   );
 }
 
-export function HUD({ match, info, onCopy, onRematch }: {
+export function HUD({ match, info, onCopy, onRematch, onReady }: {
   match: Snapshot;
   info: HudInfo;
   onCopy?: () => void;
   onRematch?: () => void;
+  onReady?: () => void;
 }) {
   const [a, b] = match.fighters;
   const storedMuted = useSyncExternalStore(subscribeMuted, isMuted, () => false);
@@ -97,9 +101,10 @@ export function HUD({ match, info, onCopy, onRematch }: {
               <button
                 type="button"
                 onClick={onRematch}
-                className="pointer-events-auto mt-6 rounded-full bg-amber-300 px-6 py-2 text-sm font-bold tracking-wide text-black"
+                disabled={info.rematchWaiting}
+                className="pointer-events-auto mt-6 rounded-full bg-amber-300 px-6 py-2 text-sm font-bold tracking-wide text-black disabled:cursor-default disabled:bg-amber-300/70"
               >
-                Rematch
+                {info.rematchWaiting ? "Waiting for opponent…" : "Rematch"}
               </button>
             )}
           </div>
@@ -109,16 +114,37 @@ export function HUD({ match, info, onCopy, onRematch }: {
       {info.waiting && (
         <div className="absolute inset-0 flex items-center justify-center bg-black/25">
           <div className="pointer-events-auto max-w-md rounded-2xl border border-white/10 bg-black/70 p-6 text-center backdrop-blur">
-            <p className="text-xl font-bold">Waiting for a challenger</p>
-            <p className="mt-2 text-sm text-white/70">
-              Send the link to a friend. The match starts the moment they hop in.
-            </p>
+            {info.needReady ? (
+              <>
+                <p className="text-xl font-bold">Get ready</p>
+                <p className="mt-2 text-sm text-white/70">
+                  Both fighters are in. Ready up to start the countdown.
+                </p>
+                {onReady && (
+                  <button
+                    type="button"
+                    onClick={onReady}
+                    disabled={info.iAmReady}
+                    className="mt-5 rounded-full bg-amber-300 px-6 py-2 text-sm font-bold tracking-wide text-black disabled:cursor-default disabled:bg-amber-300/70"
+                  >
+                    {info.iAmReady ? "Waiting for opponent…" : "Ready"}
+                  </button>
+                )}
+              </>
+            ) : (
+              <>
+                <p className="text-xl font-bold">Waiting for a challenger</p>
+                <p className="mt-2 text-sm text-white/70">
+                  Send the link to a friend. Ready up once they hop in.
+                </p>
+              </>
+            )}
           </div>
         </div>
       )}
 
       <div className="flex flex-wrap items-end justify-between gap-3 text-[11px] text-white/55">
-        <p>Move WASD · Jump W/Space · Attack J · Special K</p>
+        <p>Move WASD · Jump W/Space · Attack J · Special K · Shield L/Shift · Hold J smash</p>
         <div className="flex items-center gap-3">
           <button
             type="button"
