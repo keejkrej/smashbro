@@ -13,7 +13,7 @@ importers:
         version: 2.0.1(next@16.3.3(@babel/core@7.29.7(supports-color@7.2.0))(@types/node@20.19.43)(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(react@19.2.8)
       '@vercel/functions':
         specifier: ^3.9.5
-        version: 3.9.5
+        version: 3.9.5(ws@8.21.3)
       '@vercel/speed-insights':
         specifier: ^2.0.0
         version: 2.0.0(next@16.3.3(@babel/core@7.29.7(supports-color@7.2.0))(@types/node@20.19.43)(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(react@19.2.8)
@@ -35,6 +35,9 @@ importers:
       vgpu:
         specifier: ^0.3.1
         version: 0.3.1(supports-color@7.2.0)
+      ws:
+        specifier: ^8.21.3
+        version: 8.21.3
     devDependencies:
       '@tailwindcss/postcss':
         specifier: ^4
@@ -2213,6 +2216,18 @@ packages:
     resolution: {integrity: sha512-BN22B5eaMMI9UMtjrGd5g5eCYPpCPDUy0FJXbYsaT5zYxjFOckS53SQDE3pWkVoWpHXVb3BrYcEN4Twa55B5cA==}
     engines: {node: '>=0.10.0'}
 
+  ws@8.21.3:
+    resolution: {integrity: sha512-201TZ/kPWxoPr/OKWjquZR1SWKXcvxdH+e1xrx89b3YbmzLMFCLfnaG1HFIgWzJOEWZ7MvpK++odZufgYR50Rw==}
+    engines: {node: '>=10.0.0'}
+    peerDependencies:
+      bufferutil: ^4.0.1
+      utf-8-validate: '>=5.0.2'
+    peerDependenciesMeta:
+      bufferutil:
+        optional: true
+      utf-8-validate:
+        optional: true
+
   xdg-app-paths@5.5.1:
     resolution: {integrity: sha512-hI3flOB4PLZIy5prbtTpirobtPE2ZtZ52szO+2mM9Efp6ErM398La+C1lIpNWDfNoQk+6Lsi6nMcCwVB7pxeMQ==}
     engines: {node: '>= 6.0'}
@@ -2900,9 +2915,11 @@ snapshots:
     dependencies:
       execa: 5.1.1
 
-  '@vercel/functions@3.9.5':
+  '@vercel/functions@3.9.5(ws@8.21.3)':
     dependencies:
       '@vercel/oidc': 3.8.5
+    optionalDependencies:
+      ws: 8.21.3
 
   '@vercel/oidc@3.8.5':
     dependencies:
@@ -4569,6 +4586,8 @@ snapshots:
       isexe: 2.0.0
 
   word-wrap@1.2.5: {}
+
+  ws@8.21.3: {}
 
   xdg-app-paths@5.5.1:
     dependencies:
